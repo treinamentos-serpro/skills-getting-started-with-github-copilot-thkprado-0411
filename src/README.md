@@ -34,6 +34,14 @@ Uma aplicação FastAPI simples que permite que estudantes visualizem, se inscre
 | POST   | `/activities/{activity_name}/signup?email=student@mergington.edu` | Inscreve-se em uma atividade                                                   |
 | DELETE | `/activities/{activity_name}/participants?email=student@mergington.edu` | Remove a inscrição de um estudante da atividade |
 
+O endpoint DELETE exige autenticação HTTP Basic. Configure `UNREGISTER_CREDENTIALS` como um objeto JSON de usuários autorizados, com uma senha e o email verificado para cada estudante; para autorizar uma equipe, configure `"role": "staff"` para a conta. Por exemplo:
+
+```json
+{"student":{"password":"<senha>","email":"student@mergington.edu"},"staff":{"password":"<senha>","role":"staff"}}
+```
+
+Envie o usuário e a senha configurados como credenciais HTTP Basic. Sem credenciais válidas, a solicitação é rejeitada; estudantes só podem remover a própria inscrição e a equipe pode remover qualquer participante. Use HTTPS e mantenha as senhas de configuração em segredo.
+
 ## Modelo de Dados
 
 A aplicação usa um modelo de dados simples com identificadores significativos:
