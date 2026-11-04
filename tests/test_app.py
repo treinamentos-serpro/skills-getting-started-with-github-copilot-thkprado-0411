@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from src.app import activities
@@ -96,6 +97,48 @@ def test_signup_full_activity_returns_400(client):
     assert email not in activity["participants"]
 
 
+def test_concurrent_signups_do_not_exceed_capacity(client):
+    # Arrange
+    activity_name = "Basketball Team"
+    activity = activities[activity_name]
+    activity["participants"] = [
+        f"student{i}@mergington.edu" for i in range(activity["max_participants"] - 1)
+    ]
+    emails = ["first@mergington.edu", "second@mergington.edu"]
+
+    # Act
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda email: client.post(signup_url(activity_name), params={"email": email}),
+                emails,
+            )
+        )
+
+    # Assert
+    assert sorted(response.status_code for response in responses) == [200, 400]
+    assert len(activity["participants"]) == activity["max_participants"]
+
+
+def test_concurrent_signups_do_not_add_duplicate_participants(client):
+    # Arrange
+    activity_name = "Art Club"
+    email = "newstudent@mergington.edu"
+
+    # Act
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda _: client.post(signup_url(activity_name), params={"email": email}),
+                range(2),
+            )
+        )
+
+    # Assert
+    assert sorted(response.status_code for response in responses) == [200, 400]
+    assert activities[activity_name]["participants"].count(email) == 1
+
+
 def test_unregister_removes_participant(client):
     # Arrange
     activity_name = "Chess Club"
@@ -107,6 +150,27 @@ def test_unregister_removes_participant(client):
     # Assert
     assert response.status_code == 200
     assert response.json() == {"message": f"Unregistered {email} from {activity_name}"}
+    assert email not in activities[activity_name]["participants"]
+
+
+def test_concurrent_unregistrations_return_not_found_after_first_removal(client):
+    # Arrange
+    activity_name = "Chess Club"
+    email = "michael@mergington.edu"
+
+    # Act
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda _: client.delete(
+                    participants_url(activity_name), params={"email": email}
+                ),
+                range(2),
+            )
+        )
+
+    # Assert
+    assert sorted(response.status_code for response in responses) == [200, 404]
     assert email not in activities[activity_name]["participants"]
 
 
