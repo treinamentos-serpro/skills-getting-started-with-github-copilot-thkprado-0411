@@ -139,13 +139,17 @@ def test_concurrent_signups_do_not_add_duplicate_participants(client):
     assert activities[activity_name]["participants"].count(email) == 1
 
 
-def test_unregister_removes_participant(client):
+def test_unregister_removes_own_participant(client, unregister_credentials):
     # Arrange
     activity_name = "Chess Club"
     email = "michael@mergington.edu"
 
     # Act
-    response = client.delete(participants_url(activity_name), params={"email": email})
+    response = client.delete(
+        participants_url(activity_name),
+        params={"email": email},
+        auth=unregister_credentials["michael"],
+    )
 
     # Assert
     assert response.status_code == 200
@@ -153,7 +157,9 @@ def test_unregister_removes_participant(client):
     assert email not in activities[activity_name]["participants"]
 
 
-def test_concurrent_unregistrations_return_not_found_after_first_removal(client):
+def test_concurrent_unregistrations_return_not_found_after_first_removal(
+    client, unregister_credentials
+):
     # Arrange
     activity_name = "Chess Club"
     email = "michael@mergington.edu"
@@ -163,7 +169,9 @@ def test_concurrent_unregistrations_return_not_found_after_first_removal(client)
         responses = list(
             executor.map(
                 lambda _: client.delete(
-                    participants_url(activity_name), params={"email": email}
+                    participants_url(activity_name),
+                    params={"email": email},
+                    auth=unregister_credentials["michael"],
                 ),
                 range(2),
             )
@@ -174,26 +182,80 @@ def test_concurrent_unregistrations_return_not_found_after_first_removal(client)
     assert email not in activities[activity_name]["participants"]
 
 
-def test_unregister_unknown_activity_returns_404(client):
+def test_unregister_unknown_activity_returns_404(client, unregister_credentials):
     # Arrange
     activity_name = "Nonexistent Club"
 
     # Act
-    response = client.delete(participants_url(activity_name), params={"email": "a@mergington.edu"})
+    response = client.delete(
+        participants_url(activity_name),
+        params={"email": "a@mergington.edu"},
+        auth=unregister_credentials["michael"],
+    )
 
     # Assert
     assert response.status_code == 404
     assert response.json()["detail"] == "Activity not found"
 
 
-def test_unregister_not_signed_up_returns_404(client):
+def test_unregister_not_signed_up_returns_404(client, unregister_credentials):
     # Arrange
     activity_name = "Chess Club"
     email = "notregistered@mergington.edu"
 
     # Act
-    response = client.delete(participants_url(activity_name), params={"email": email})
+    response = client.delete(
+        participants_url(activity_name),
+        params={"email": email},
+        auth=unregister_credentials["unregistered"],
+    )
 
     # Assert
     assert response.status_code == 404
     assert response.json()["detail"] == "Student is not signed up for this activity"
+
+
+def test_unregister_requires_authentication(client):
+    response = client.delete(
+        participants_url("Chess Club"),
+        params={"email": "michael@mergington.edu"},
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Basic"
+    assert "michael@mergington.edu" in activities["Chess Club"]["participants"]
+
+
+def test_unregister_rejects_invalid_password(client, unregister_credentials):
+    username, _ = unregister_credentials["michael"]
+    response = client.delete(
+        participants_url("Chess Club"),
+        params={"email": "michael@mergington.edu"},
+        auth=(username, "wrong-password"),
+    )
+
+    assert response.status_code == 401
+    assert "michael@mergington.edu" in activities["Chess Club"]["participants"]
+
+
+def test_unregister_rejects_another_students_email(client, unregister_credentials):
+    response = client.delete(
+        participants_url("Chess Club"),
+        params={"email": "michael@mergington.edu"},
+        auth=unregister_credentials["other"],
+    )
+
+    assert response.status_code == 403
+    assert "michael@mergington.edu" in activities["Chess Club"]["participants"]
+
+
+def test_staff_can_unregister_any_participant(client, unregister_credentials):
+    email = "michael@mergington.edu"
+    response = client.delete(
+        participants_url("Chess Club"),
+        params={"email": email},
+        auth=unregister_credentials["staff"],
+    )
+
+    assert response.status_code == 200
+    assert email not in activities["Chess Club"]["participants"]
