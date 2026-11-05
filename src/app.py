@@ -5,11 +5,16 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+import json
+import secrets
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import os
 from pathlib import Path
+
+unregister_security = HTTPBasic()
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
@@ -78,6 +83,43 @@ activities = {
 }
 
 
+def get_unregister_account(
+    credentials: HTTPBasicCredentials = Depends(unregister_security),
+):
+    try:
+        accounts = json.loads(os.environ.get("UNREGISTER_CREDENTIALS", "{}"))
+    except json.JSONDecodeError:
+        accounts = {}
+
+    if not isinstance(accounts, dict):
+        accounts = {}
+
+    authenticated_account = None
+    for username, account in accounts.items():
+        if not isinstance(username, str) or not isinstance(account, dict):
+            continue
+        password = account.get("password")
+        if not isinstance(password, str) or not password:
+            continue
+        username_matches = secrets.compare_digest(
+            credentials.username.encode("utf-8"), username.encode("utf-8")
+        )
+        password_matches = secrets.compare_digest(
+            credentials.password.encode("utf-8"), password.encode("utf-8")
+        )
+        if username_matches and password_matches:
+            authenticated_account = account
+
+    if authenticated_account is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    return authenticated_account
+
+
 @app.get("/")
 def root():
     return RedirectResponse(url="/static/index.html")
@@ -112,10 +154,20 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/participants")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(
+    activity_name: str,
+    email: str,
+    account: dict = Depends(get_unregister_account),
+):
     """Unregister a student from an activity"""
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
+
+    if account.get("role") != "staff" and account.get("email") != email:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only unregister your own account",
+        )
 
     activity = activities[activity_name]
 
